@@ -221,31 +221,43 @@ func send(ireq *Request, rt RoundTripper, deadline time.Time) (resp *Response, d
 
 	// forkReq forks req into a shallow clone of ireq the first
 	// time it's called.
-	forkReq := func() {
+	forkReq := func() error {
 		if ireq == req {
+			body, err := ireq.GetBody()
+			if err != nil {
+				return err
+			}
 			req = new(Request)
 			*req = *ireq // shallow clone
+			req.Body = body
 		}
+		return nil
 	}
 
 	// Most the callers of send (Get, Post, et al) don't need
 	// Headers, leaving it uninitialized. We guarantee to the
 	// Transport that this has been initialized, though.
 	if req.Header == nil {
-		forkReq()
+		if err := forkReq(); err != nil {
+			return nil, alwaysFalse, fmt.Errorf("failed to fork request, err: %v", err)
+		}
 		req.Header = make(Header)
 	}
 
 	if u := req.URL.User; u != nil && req.Header.Get("Authorization") == "" {
 		username := u.Username()
 		password, _ := u.Password()
-		forkReq()
+		if err := forkReq(); err != nil {
+			return nil, alwaysFalse, fmt.Errorf("failed to fork request, err: %v", err)
+		}
 		req.Header = cloneOrMakeHeader(ireq.Header)
 		req.Header.Set("Authorization", "Basic "+basicAuth(username, password))
 	}
 
 	if !deadline.IsZero() {
-		forkReq()
+		if err := forkReq(); err != nil {
+			return nil, alwaysFalse, fmt.Errorf("failed to fork request, err: %v", err)
+		}
 	}
 	stopTimer, didTimeout := setRequestCancel(req, rt, deadline)
 
